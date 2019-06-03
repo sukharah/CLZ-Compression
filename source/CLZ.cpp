@@ -59,8 +59,93 @@ bool CLZ::verify(std::ifstream& infile) {
 }
   
 void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
-  (void)infile;
-  (void)outfile;
+  const int WINDOW_SIZE = 4096;
+  const int ARRAY_SIZE = 8192;
+  
+  const int MAX_HEDGE = 18;
+  
+  outfile << "CLZ";
+  for (int i = 0; i < 13; ++i)
+    outfile.put(0);
+  
+  char buffer[18];
+  buffer[0] = 0;
+  int num_entries = 0;
+  int buffer_ofs = 1;
+  
+  char window[ARRAY_SIZE];
+  int window_ofs = 0;
+  int decomp_size = 0;
+  int hedge_size = 0;
+  
+  int comp_size = 0;
+  
+  char c;
+  bool exit = false;
+  while (!exit) {
+    bool condition;
+    if (infile.get(c)) {
+      window[(window_ofs + hedge_size++) % ARRAY_SIZE] = c;
+      ++decomp_size;
+      condition = (hedge_size == MAX_HEDGE);
+    } else {
+      condition = (hedge_size > 0);
+      exit = !condition;
+    }
+    if (condition) {
+      int delta = 0;
+      int longest = 0;
+      for (int i = 1; i < std::min(decomp_size, WINDOW_SIZE) - hedge_size; ++i) {
+        int l = 0;
+        for (int j = 0; j < std::min(i, hedge_size) && window[(window_ofs - i + j + ARRAY_SIZE) % ARRAY_SIZE] == window[(window_ofs + j) % ARRAY_SIZE]; ++j) {
+          ++l;
+        }
+        if (l > longest) {
+          longest = l;
+          delta = i;
+        }
+      }
+      if (longest >= 3) {
+        buffer[0] |= 1 << num_entries++;
+        delta = -delta;
+        
+        buffer[buffer_ofs] = delta;
+        buffer[buffer_ofs + 1] = (delta >> 4 & 0xf0) | ((longest - 3) & 0x0f);
+        buffer_ofs += 2;
+        
+        comp_size += 2;
+        window_ofs += longest;
+        hedge_size -= longest;
+      } else {
+        buffer[buffer_ofs++] = window[window_ofs++ % ARRAY_SIZE];
+        ++num_entries;
+        
+        --hedge_size;
+        ++comp_size;
+      }
+      if (num_entries >= 8) {
+        outfile.write(buffer, buffer_ofs);
+        buffer_ofs = 1;
+        num_entries = 0;
+        buffer[0] = 0;
+      }
+      
+    }
+  }
+  
+  if (num_entries) {
+    outfile.write(buffer, buffer_ofs);
+  }
+  
+  buffer[0] = window_ofs >> 24;
+  buffer[1] = window_ofs >> 16;
+  buffer[2] = window_ofs >> 8;
+  buffer[3] = window_ofs;
+  buffer[7] = buffer[6] = buffer[5] = buffer[4] = 0;
+  
+  outfile.seekp(4, std::ios::beg);
+  outfile.write(buffer, 8);
+  outfile.write(buffer, 4);
 }
   
 void CLZ::unpack(std::ifstream& infile, std::ofstream& outfile) {
