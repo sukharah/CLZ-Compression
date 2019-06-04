@@ -2,7 +2,6 @@
 
 #include <iostream>
 #include <climits>
-//#include <algorithm>
 
 bool CLZ::verify(std::ifstream& infile) {
   int bits = 0, bit_count = 0;
@@ -97,11 +96,11 @@ bool CLZ::verify(std::ifstream& infile) {
   
 void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
   const int WINDOW_SIZE = 4096;
-  const int ARRAY_SIZE = 16384; // 8192
+  const int ARRAY_SIZE = 16384;
   
   const int MAX_HEDGE = 18;
   
-  const int BUFFER_SIZE = 16384; // 4096
+  const int BUFFER_SIZE = 16384;
   const int BUFFER_MAX_OUT = BUFFER_SIZE - 18;
   
   char buffer[BUFFER_SIZE];
@@ -221,7 +220,7 @@ void CLZ::pack2(std::ifstream& infile, std::ofstream& outfile) {
   infile.seekg(0, std::ios::end);
   size_t decomp_size = infile.tellg();
   
-  char* array = new char[decomp_size];
+  char* array = new char[std::max(16u, decomp_size)];
   
   array[0] = 'C';
   array[1] = 'L';
