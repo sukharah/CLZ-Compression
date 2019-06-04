@@ -1,6 +1,8 @@
 #include "CLZ.h"
 
 #include <iostream>
+#include <climits>
+//#include <algorithm>
 
 bool CLZ::verify(std::ifstream& infile) {
   int bits = 0, bit_count = 0;
@@ -99,11 +101,6 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
   
   const int MAX_HEDGE = 18;
   
-  outfile << "CLZ";
-  for (int i = 0; i < 13; ++i)
-    outfile.put(0);
-  
-  
   const int BUFFER_SIZE = 16384; // 4096
   const int BUFFER_MAX_OUT = BUFFER_SIZE - 18;
   
@@ -117,6 +114,11 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
   int window_ofs = 0;
   int decomp_size = 0;
   int hedge_size = 0;
+  
+  window[0] = 'C';
+  window[1] = 'L';
+  window[2] = 'Z';
+  outfile.write(window, 16);
   
   //char c;
   bool condition = true;
@@ -200,6 +202,126 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
   outfile.seekp(4, std::ios::beg);
   outfile.write(buffer, 8);
   outfile.write(buffer, 4);
+}
+
+
+void CLZ::pack2(std::ifstream& infile, std::ofstream& outfile) {
+  infile.seekg(0, std::ios::end);
+  size_t decomp_size = infile.tellg();
+  
+  char* array = new char[decomp_size];
+  
+  array[0] = 'C';
+  array[1] = 'L';
+  array[2] = 'Z';
+  array[3] = 0;
+  
+  array[12] = array[4] = decomp_size >> 24;
+  array[13] = array[5] = decomp_size >> 16;
+  array[14] = array[6] = decomp_size >> 8;
+  array[15] = array[7] = decomp_size;
+  
+  array[11] = array[10] = array[9] = array[8] = 0;
+  
+  outfile.write(array, 16);
+  
+  infile.seekg(0, std::ios::beg);
+  
+  infile.read(array, decomp_size);
+  
+  const size_t MAX_SUB = 18;
+  const size_t WINDOW_SIZE = 4096;
+  
+  int* comp_bits = new int[decomp_size + 1];
+  int* dlpair = new int[decomp_size + 1];
+  comp_bits[0] = 0;
+  for (size_t i = 1; i <= decomp_size; ++i)
+    comp_bits[i] = INT_MAX;
+  
+  // get minimum cost compression
+  for (size_t i = 0; i < decomp_size; ++i) {
+    int current_dlpairs[MAX_SUB];
+    size_t longest = 0;
+    size_t start = std::max(WINDOW_SIZE, i) - WINDOW_SIZE;
+    for (size_t j = start; longest < MAX_SUB && j < i; ++j) {
+      size_t rev_ofs = (i - 1 - j) + start;
+      size_t max_sub = std::min(std::min(MAX_SUB, i - rev_ofs), decomp_size - i);
+      size_t l = 0;
+      for (size_t k = 0; k < max_sub && array[rev_ofs + k] == array[i + k]; ++k) {
+        ++l;
+      }
+      if (l > longest) {
+        for (size_t t = longest; t < l; ++t) {
+          current_dlpairs[t] = i - rev_ofs;
+        }
+        longest = l;
+      }
+    }
+
+    if (comp_bits[i + 1] > comp_bits[i] + 9) {
+      comp_bits[i + 1] = comp_bits[i] + 9;
+      dlpair[i + 1] = 1;
+    }
+    
+    for (size_t t = 3; t <= longest; ++t) {
+      if (comp_bits[i + t] > comp_bits[i] + 17) {
+        comp_bits[i + t] = comp_bits[i] + 17;
+        dlpair[i + t] = -current_dlpairs[t - 1] << 16 | t;
+      }
+    }
+  }
+
+  // align with start of each block
+  int ofs = decomp_size;
+  int del = dlpair[ofs];
+  while (ofs > 0) {
+    ofs -= del & 0xffff;
+    int temp = dlpair[ofs];
+    dlpair[ofs] = del;
+    del = temp;
+  }
+  
+  size_t comp_size = (comp_bits[decomp_size] + 7) / 8;
+  char* buffer = new char[comp_size];
+  
+  size_t buffer_ofs = 0;
+  size_t buffer_type_ofs = 0;
+  size_t num_entries = 0;
+  if (comp_size) {
+    buffer[buffer_ofs++] = 0;
+  }
+  
+  size_t aofs = 0;
+  while (aofs < decomp_size) {
+    del = dlpair[aofs];
+    
+    size_t len = del & 0xffff;
+    if (len < 3) {
+      buffer[buffer_ofs++] = array[aofs];
+      ++num_entries;
+      ++aofs;
+    } else {
+      buffer[buffer_type_ofs] |= 1 << num_entries;
+      buffer[buffer_ofs] = del >> 16;
+      buffer[buffer_ofs + 1] = (del >> 20 & 0xf0) | ((len - 3) & 0x0f);
+      buffer_ofs += 2;
+      aofs += len;
+      ++num_entries;
+    }
+    if (num_entries == 8) {
+      num_entries = 0;
+      if (buffer_ofs < comp_size - 1) {
+        buffer_type_ofs = buffer_ofs++;
+        buffer[buffer_type_ofs] = 0;
+      }
+    }
+  }
+  outfile.write(buffer, buffer_ofs);
+  
+  delete[] buffer;
+  delete[] array;
+  delete[] comp_bits;
+  delete[] dlpair;
 }
   
 void CLZ::unpack(std::ifstream& infile, std::ofstream& outfile) {

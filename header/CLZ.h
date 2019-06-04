@@ -4,10 +4,11 @@
 #include <fstream>
 
 namespace CLZ {
-  
   bool verify(std::ifstream&);
   
   void pack(std::ifstream&, std::ofstream&);
+  
+  void pack2(std::ifstream&, std::ofstream&);
   
   void unpack(std::ifstream&, std::ofstream&);
 };
