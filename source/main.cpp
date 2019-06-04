@@ -6,6 +6,9 @@ int main(int argc, char** argv) {
     std::string command(argv[1]);
     std::ifstream infile;
     std::ofstream outfile;
+    infile.rdbuf()->pubsetbuf(0, 0);
+    outfile.rdbuf()->pubsetbuf(0, 0);
+    
     if ("pack" == command) {
       infile.open(argv[2], std::ios_base::in | std::ios_base::binary);
       if (infile) {
