@@ -416,6 +416,7 @@ void CLZ::unpack(std::ifstream& infile, std::ofstream& outfile) {
           window[window_ofs++] = c;
           if (window_ofs == WINDOW_SIZE) {
             outfile.write(window, WINDOW_SIZE);
+            window_ofs = 0;
           }
         }
         bits >>= 1;
@@ -425,5 +426,4 @@ void CLZ::unpack(std::ifstream& infile, std::ofstream& outfile) {
   }
   if (window_ofs)
     outfile.write(window, window_ofs);
-  outfile.flush();
 }
