@@ -123,7 +123,7 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
   //char c;
   bool condition = true;
   while (condition) {
-    if (hedge_size < MAX_HEDGE && !infile.eof()) {
+    if (hedge_size < MAX_HEDGE + 1 && !infile.eof()) {
       int diff = (ARRAY_SIZE - WINDOW_SIZE) - hedge_size;
       int winpos = (window_ofs + hedge_size) % ARRAY_SIZE;
       int rem = std::min(ARRAY_SIZE - winpos, diff);
@@ -141,30 +141,42 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
     }
     condition = (hedge_size > 0);
     if (condition) {
-      int delta = 0;
-      int longest = 0;
+      int deltaA = 0;
+      int longestA = 0;
       int ehedge = std::min(hedge_size, MAX_HEDGE);
       for (int i = 1; i < std::min(decomp_size, WINDOW_SIZE); ++i) {
         int l = 0;
         for (int j = 0; j < std::min(i, ehedge) && window[(window_ofs - i + j + ARRAY_SIZE) % ARRAY_SIZE] == window[(window_ofs + j) % ARRAY_SIZE]; ++j) {
           ++l;
         }
-        if (l > longest) {
-          longest = l;
-          delta = i;
+        if (l > longestA) {
+          longestA = l;
+          deltaA = i;
         }
       }
-      if (longest >= 3) {
+      int longestB = 0;
+      ehedge = std::min(hedge_size - 1, MAX_HEDGE);
+      for (int i = 1; i < std::min(decomp_size + 1, WINDOW_SIZE); ++i) {
+        int l = 0;
+        for (int j = 0; j < std::min(i, ehedge) && window[(window_ofs + 1 - i + j + ARRAY_SIZE) % ARRAY_SIZE] == window[(window_ofs + 1 + j) % ARRAY_SIZE]; ++j) {
+          ++l;
+        }
+        if (l > longestB) {
+          longestB = l;
+        }
+      }
+      
+      if ((longestA - 2) >= (longestB - 3) && longestA >= 3) {
         buffer[buffer_type_ofs] |= 1 << num_entries++;
-        delta = -delta;
+        deltaA = -deltaA;
         
-        buffer[buffer_ofs] = delta & 0xff;
-        buffer[buffer_ofs + 1] = (delta >> 4 & 0xf0) | ((longest - 3) & 0x0f);
+        buffer[buffer_ofs] = deltaA & 0xff;
+        buffer[buffer_ofs + 1] = (deltaA >> 4 & 0xf0) | ((longestA - 3) & 0x0f);
         buffer_ofs += 2;
 
-        window_ofs += longest;
-        hedge_size -= longest;
-        decomp_size += longest;
+        window_ofs += longestA;
+        hedge_size -= longestA;
+        decomp_size += longestA;
       } else {
         buffer[buffer_ofs++] = window[window_ofs++ % ARRAY_SIZE];
         ++num_entries;
