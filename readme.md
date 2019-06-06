@@ -48,11 +48,11 @@ The code provided in this repository is for a command line utility to provide co
 
 To compile, the following command can be used
 ```
-g++ -std=c++11 -iquote header "source/main.cpp" "source/CLZ.cpp" 
+g++ -std=c++11 -iquote header "source/main.cpp" "source/CLZ.cpp" "source/CLZHashTable.cpp"
 ```
 Additional parameters can be added to increase portability or improve performance of the code.
 ```
-g++ -static-libgcc -static-libstdc++ -march=native -Ofast -W -Wall -Wextra -std=c++11 -iquote header "source/main.cpp" "source/CLZ.cpp"
+g++ -static-libgcc -static-libstdc++ -march=native -Ofast -W -Wall -Wextra -std=c++11 -iquote header "source/main.cpp" "source/CLZ.cpp" "source/CLZHashTable.cpp"
 ```
 
 The program expects three command line arguments.
@@ -69,7 +69,7 @@ To decompress a file:
 ```
 program.exe unpack "./compressed_input.clz" "./uncompressed_ouput.txt"
 ```
-To compress a file using in-memory optimizing compression:
+To compress a file using in-memory optimizing compression (saves a few bytes in compressed file):
 ```
 program.exe pack2 "./uncompressed_input.txt" "./compressed_ouput.clz"
 ```
