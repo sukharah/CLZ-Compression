@@ -3,6 +3,10 @@
 #include <iostream>
 #include <climits>
 
+#include <queue>
+
+#include "CLZHashTable.h"
+
 bool CLZ::verify(std::ifstream& infile) {
   int bits = 0, bit_count = 0;
   
@@ -95,24 +99,43 @@ bool CLZ::verify(std::ifstream& infile) {
 }
   
 void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
-  const int WINDOW_SIZE = 4096;
-  const int ARRAY_SIZE = 16384;
+  const size_t WINDOW_SIZE = 4096;
+  const size_t ARRAY_SIZE = 16384;
   
-  const int MAX_HEDGE = 18;
+  const size_t MAX_HEDGE = 18;
   
-  const int BUFFER_SIZE = 16384;
-  const int BUFFER_MAX_OUT = BUFFER_SIZE - 18;
+  const size_t BUFFER_SIZE = 16384;
+  const size_t BUFFER_MAX_OUT = BUFFER_SIZE - 18;
+  
+  // hashing constants
+  const size_t PRIME_A = 37,
+               PRIME_B = 54059,
+               PRIME_C = 76963;
+  
+  CLZHashTable hash_tables[MAX_HEDGE - 2];
+  for (size_t i = 0; i < MAX_HEDGE - 2; ++i)
+    hash_tables[i].setStrLen(i + 3);
+
+  // indexed by substring start offset % HASH_BUFFER_SIZE
+  const int HASH_BUFFER_SIZE = MAX_HEDGE * 2;
+  size_t hashes[HASH_BUFFER_SIZE][MAX_HEDGE + 1];
+  
+  for (size_t i = 0; i < HASH_BUFFER_SIZE; ++i) {
+    hashes[i][0] = PRIME_A;
+  }
+  
+  std::queue<std::pair<CLZHashTable::Node*, size_t>> clzqueue[MAX_HEDGE - 1];
   
   char buffer[BUFFER_SIZE];
   buffer[0] = 0;
-  int num_entries = 0;
-  int buffer_ofs = 1;
-  int buffer_type_ofs = 0;
+  size_t num_entries = 0;
+  size_t buffer_ofs = 1;
+  size_t buffer_type_ofs = 0;
   
   char window[ARRAY_SIZE];
-  int window_ofs = 0;
-  int decomp_size = 0;
-  int hedge_size = 0;
+  size_t window_ofs = 0;
+  size_t decomp_size = 0;
+  size_t hedge_size = 0;
   
   window[0] = 'C';
   window[1] = 'L';
@@ -121,18 +144,23 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
   
   //char c;
   bool condition = true;
+  bool skip_substr = false;
+  int deltaB = 0;
+  size_t longestB = 0;
+  size_t prev_hash_ofs = 0;
+  size_t last_decomp = 0;
   while (condition) {
     if (hedge_size < MAX_HEDGE + 1 && !infile.eof()) {
-      int diff = (ARRAY_SIZE - WINDOW_SIZE) - hedge_size;
-      int winpos = (window_ofs + hedge_size) % ARRAY_SIZE;
-      int rem = std::min(ARRAY_SIZE - winpos, diff);
-      int amt = 0;
+      size_t diff = (ARRAY_SIZE - WINDOW_SIZE) - hedge_size;
+      size_t winpos = (window_ofs + hedge_size) % ARRAY_SIZE;
+      size_t rem = std::min(ARRAY_SIZE - winpos, diff);
+      size_t amt = 0;
       if (rem) {
         infile.read(window + winpos, rem);
         amt = infile.gcount();
       }
-      rem = diff - rem;
-      if (!infile.eof() && (rem > 0)) {
+      if (!infile.eof() && diff > rem) {
+        rem = diff - rem;
         infile.read(window, rem);
         amt += infile.gcount();
       }
@@ -141,31 +169,74 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
     condition = (hedge_size > 0);
     if (condition) {
       int deltaA = 0;
-      int longestA = 0;
-      int ehedge = std::min(hedge_size, MAX_HEDGE);
-      for (int i = 1; i < std::min(decomp_size, WINDOW_SIZE); ++i) {
-        int l = 0;
-        for (int j = 0; j < std::min(i, ehedge) && window[(window_ofs - i + j + ARRAY_SIZE) % ARRAY_SIZE] == window[(window_ofs + j) % ARRAY_SIZE]; ++j) {
-          ++l;
+      size_t longestA = 0;
+      
+      // calculate hashes for new substrings in hedge
+      size_t hash_adv_ofs = window_ofs + std::min(hedge_size, MAX_HEDGE + 1);
+      while (prev_hash_ofs < hash_adv_ofs) {
+        size_t hx = static_cast<size_t>(window[prev_hash_ofs % ARRAY_SIZE]);
+        for (size_t j = 1; j <= MAX_HEDGE; ++j) {
+          size_t hashofs = (HASH_BUFFER_SIZE + prev_hash_ofs - j + 1) % HASH_BUFFER_SIZE;
+          hashes[hashofs][j] = (hashes[hashofs][j - 1] * PRIME_B) ^ (hx * PRIME_C);
         }
-        if (l > longestA) {
-          longestA = l;
-          deltaA = i;
-        }
+        ++prev_hash_ofs;
       }
-      int longestB = 0;
-      ehedge = std::min(hedge_size - 1, MAX_HEDGE);
-      for (int i = 1; i < std::min(decomp_size + 1, WINDOW_SIZE); ++i) {
-        int l = 0;
-        for (int j = 0; j < std::min(i, ehedge) && window[(window_ofs + 1 - i + j + ARRAY_SIZE) % ARRAY_SIZE] == window[(window_ofs + 1 + j) % ARRAY_SIZE]; ++j) {
-          ++l;
+      
+      // add all substrings with last_decomp as last byte to pool
+      while (last_decomp < decomp_size) {
+        for (size_t j = 3; j <= std::min(last_decomp + 1, MAX_HEDGE); ++j) {
+          size_t start_ofs = last_decomp - j + 1;
+          size_t hash_idx = start_ofs % HASH_BUFFER_SIZE;
+          size_t hash = hashes[hash_idx][j];
+          std::pair<CLZHashTable::Node*, size_t> prev = hash_tables[j - 3].addNode(window, ARRAY_SIZE, start_ofs, hash);
+          clzqueue[j - 3].emplace(prev.first, start_ofs);
         }
-        if (l > longestB) {
-          longestB = l;
+        ++last_decomp;
+      }
+      
+      if (!skip_substr) {
+        longestA = 0;
+        size_t maxsub = std::min(std::min(1 + decomp_size, MAX_HEDGE), hedge_size);
+        for (size_t j = maxsub; !longestA && j >= 3; --j) {
+          size_t hash = hashes[window_ofs % HASH_BUFFER_SIZE][j];
+          size_t prev = hash_tables[j - 3].getLast(window, ARRAY_SIZE, window_ofs, hash);
+          if (prev != window_ofs) {
+            longestA = j;
+            deltaA = window_ofs - prev;
+          }
+        }
+      } else {
+        deltaA = deltaB;
+        longestA = longestB;
+        skip_substr = false;
+      }
+      
+      longestB = 0;
+      deltaB = 0;
+      {
+        size_t maxsub = std::min(2 + decomp_size, MAX_HEDGE);
+        for (size_t j = maxsub; !longestB && j >= 3; --j) {
+          size_t hash = hashes[(window_ofs + 1) % HASH_BUFFER_SIZE][j];
+          size_t prev = hash_tables[j - 3].getLast(window, ARRAY_SIZE, window_ofs + 1, hash);
+          if (prev != window_ofs + 1) {
+            longestB = j;
+            deltaB = window_ofs + 1 - prev;
+          }
         }
       }
       
-      if ((longestA - 2) >= (longestB - 3) && longestA >= 3) {
+      if ((longestA + 3 - 2) < (longestB + 3 - 3) || longestA < 3)
+        longestA = 1;
+      
+      // drop dictionary entries once they dip below the window
+      for (size_t q = 0; q < MAX_HEDGE - 2; ++q) {
+        while (!clzqueue[q].empty() && (decomp_size + longestA) - clzqueue[q].front().second > WINDOW_SIZE) {
+          hash_tables[q].removeNode(clzqueue[q].front());
+          clzqueue[q].pop();
+        }
+      }
+      
+      if (longestA >= 3) {
         buffer[buffer_type_ofs] |= 1 << num_entries++;
         deltaA = -deltaA;
         
@@ -182,6 +253,7 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
         
         --hedge_size;
         ++decomp_size;
+        skip_substr = true;
       }
       if (num_entries >= 8) {
         num_entries = 0;
