@@ -211,6 +211,15 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
         skip_substr = false;
       }
       
+      for (size_t j = 3; j <= std::min(last_decomp + 1, MAX_HEDGE); ++j) {
+        size_t start_ofs = last_decomp - j + 1;
+        size_t hash_idx = start_ofs % HASH_BUFFER_SIZE;
+        size_t hash = hashes[hash_idx][j];
+        std::pair<CLZHashTable::Node*, size_t> prev = hash_tables[j - 3].addNode(window, ARRAY_SIZE, start_ofs, hash);
+        clzqueue[j - 3].emplace(prev.first, start_ofs);
+      }
+      ++last_decomp;
+      
       longestB = 0;
       deltaB = 0;
       {
