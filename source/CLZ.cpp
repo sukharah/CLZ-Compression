@@ -142,7 +142,6 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
   window[2] = 'Z';
   outfile.write(window, 16);
   
-  //char c;
   bool condition = true;
   bool skip_substr = false;
   int deltaB = 0;
@@ -174,10 +173,10 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
       // calculate hashes for new substrings in hedge
       size_t hash_adv_ofs = window_ofs + std::min(hedge_size, MAX_HEDGE + 1);
       while (prev_hash_ofs < hash_adv_ofs) {
-        size_t hx = static_cast<size_t>(window[prev_hash_ofs % ARRAY_SIZE]);
+        size_t hx = static_cast<size_t>(window[prev_hash_ofs % ARRAY_SIZE]) * PRIME_C;
         for (size_t j = 1; j <= MAX_HEDGE; ++j) {
           size_t hashofs = (HASH_BUFFER_SIZE + prev_hash_ofs - j + 1) % HASH_BUFFER_SIZE;
-          hashes[hashofs][j] = (hashes[hashofs][j - 1] * PRIME_B) ^ (hx * PRIME_C);
+          hashes[hashofs][j] = (hashes[hashofs][j - 1] * PRIME_B) ^ hx;
         }
         ++prev_hash_ofs;
       }
@@ -324,29 +323,80 @@ void CLZ::pack2(std::ifstream& infile, std::ofstream& outfile) {
   const size_t MAX_SUB = 18;
   const size_t WINDOW_SIZE = 4096;
   
+  // hashing constants
+  const size_t PRIME_A = 37,
+               PRIME_B = 54059,
+               PRIME_C = 76963;
+  
+  CLZHashTable hash_tables[MAX_SUB - 2];
+  for (size_t i = 0; i < MAX_SUB - 2; ++i)
+    hash_tables[i].setStrLen(i + 3);
+
+  // indexed by substring start offset % HASH_BUFFER_SIZE
+  const int HASH_BUFFER_SIZE = MAX_SUB * 2;
+  size_t hashes[HASH_BUFFER_SIZE][MAX_SUB + 1];
+  
+  for (size_t i = 0; i < HASH_BUFFER_SIZE; ++i) {
+    hashes[i][0] = PRIME_A;
+  }
+  
+  std::queue<std::pair<CLZHashTable::Node*, size_t>> clzqueue[MAX_SUB - 1];
+  
   int* comp_bits = new int[decomp_size + 1];
   int* dlpair = new int[decomp_size + 1];
   comp_bits[0] = 0;
   for (size_t i = 1; i <= decomp_size; ++i)
     comp_bits[i] = INT_MAX;
   
+  // calculate initial hashes
+  for (size_t i = 0; i < std::min(MAX_SUB - 1, decomp_size); ++i) {
+    size_t hx = static_cast<size_t>(array[i]) * PRIME_C;
+    for (size_t j = 1; j <= std::min(decomp_size, MAX_SUB); ++j) {
+      size_t hashofs = (HASH_BUFFER_SIZE + i - j + 1) % HASH_BUFFER_SIZE;
+      hashes[hashofs][j] = (hashes[hashofs][j - 1] * PRIME_B) ^ hx;
+    }
+  }
+  
   // get minimum cost compression
   for (size_t i = 0; i < decomp_size; ++i) {
+    
+    // update hashes
+    if (i + MAX_SUB - 1 < decomp_size) {
+      size_t ofs = i + MAX_SUB - 1;
+      size_t hx = static_cast<size_t>(array[ofs]) * PRIME_C;
+      for (size_t j = 1; j <= std::min(decomp_size, MAX_SUB); ++j) {
+        size_t hashofs = (HASH_BUFFER_SIZE + ofs - j + 1) % HASH_BUFFER_SIZE;
+        hashes[hashofs][j] = (hashes[hashofs][j - 1] * PRIME_B) ^ hx;
+      }
+    }
+    
+    // add strings to pool
+    for (size_t j = 3; j <= std::min(i, MAX_SUB); ++j) {
+      size_t start_ofs = i - j;
+      size_t hash_idx = start_ofs % HASH_BUFFER_SIZE;
+      size_t hash = hashes[hash_idx][j];
+      std::pair<CLZHashTable::Node*, size_t> prev = hash_tables[j - 3].addNode(array, decomp_size, start_ofs, hash);
+      clzqueue[j - 3].emplace(prev.first, start_ofs);
+    }
+
     int current_dlpairs[MAX_SUB];
     size_t longest = 0;
-    size_t start = std::max(WINDOW_SIZE, i) - WINDOW_SIZE;
-    for (size_t j = start; longest < MAX_SUB && j < i; ++j) {
-      size_t rev_ofs = (i - 1 - j) + start;
-      size_t max_sub = std::min(std::min(MAX_SUB, i - rev_ofs), decomp_size - i);
-      size_t l = 0;
-      for (size_t k = 0; k < max_sub && array[rev_ofs + k] == array[i + k]; ++k) {
-        ++l;
-      }
-      if (l > longest) {
-        for (size_t t = longest; t < l; ++t) {
-          current_dlpairs[t] = i - rev_ofs;
+    size_t maxsub = std::min(std::min(MAX_SUB, decomp_size - i), i);
+    for (size_t j = maxsub; !longest && j >= 3; --j) {
+      size_t hash = hashes[i % HASH_BUFFER_SIZE][j];
+      size_t prev = hash_tables[j - 3].getLast(array, decomp_size, i, hash);
+      if (prev != i) {
+        for (size_t t = std::max(longest, 2u); t < j; ++t) {
+          current_dlpairs[t] = i - prev;
         }
-        longest = l;
+        longest = j;
+      }
+    }
+    // remove old dictionary entries
+    for (size_t q = 0; q < MAX_SUB - 2; ++q) {
+      while (!clzqueue[q].empty() && (i + 1 - clzqueue[q].front().second) > WINDOW_SIZE) {
+        hash_tables[q].removeNode(clzqueue[q].front());
+        clzqueue[q].pop();
       }
     }
 
