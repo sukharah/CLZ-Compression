@@ -238,7 +238,7 @@ void CLZ::pack(std::ifstream& infile, std::ofstream& outfile) {
       
       // drop dictionary entries once they dip below the window
       for (size_t q = 0; q < MAX_HEDGE - 2; ++q) {
-        while (!clzqueue[q].empty() && (decomp_size + longestA) - clzqueue[q].front().second > WINDOW_SIZE) {
+        while (!clzqueue[q].empty() && (decomp_size + longestA + 1) - clzqueue[q].front().second > WINDOW_SIZE) {
           hash_tables[q].removeNode(clzqueue[q].front());
           clzqueue[q].pop();
         }
